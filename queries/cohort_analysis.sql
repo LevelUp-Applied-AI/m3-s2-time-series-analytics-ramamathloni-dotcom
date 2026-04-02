@@ -1,22 +1,27 @@
--- Step 1: Define cohorts by the month of the first purchase
+-- Using FIRST_VALUE window function to define cohorts
 WITH FirstPurchases AS (
     SELECT 
         customer_id,
-        MIN(order_date) as first_order_date,
-        DATE_TRUNC('month', MIN(order_date)) as cohort_month
+        order_date,
+        FIRST_VALUE(order_date) OVER (PARTITION BY customer_id ORDER BY order_date) as first_order_date
     FROM orders
-    GROUP BY 1
 ),
--- Step 2: Calculate days between subsequent orders and the first purchase
+Cohorts AS (
+    SELECT 
+        customer_id,
+        first_order_date,
+        DATE_TRUNC('month', first_order_date) as cohort_month
+    FROM FirstPurchases
+    GROUP BY 1, 2, 3
+),
 RetentionData AS (
     SELECT 
-        fp.cohort_month,
+        c.cohort_month,
         o.customer_id,
-        (o.order_date::date - fp.first_order_date::date) as days_diff
+        (o.order_date::date - c.first_order_date::date) as days_diff
     FROM orders o
-    JOIN FirstPurchases fp ON o.customer_id = fp.customer_id
+    JOIN Cohorts c ON o.customer_id = c.customer_id
 )
--- Step 3: Aggregate metrics to show cohort size and retention percentages
 SELECT 
     cohort_month,
     COUNT(DISTINCT customer_id) as cohort_size,
@@ -25,4 +30,4 @@ SELECT
     ROUND(COUNT(DISTINCT CASE WHEN days_diff > 60 AND days_diff <= 90 THEN customer_id END) * 100.0 / COUNT(DISTINCT customer_id), 2) as retention_90d_pct
 FROM RetentionData
 GROUP BY 1
-ORDER BY 1; 
+ORDER BY 1;
